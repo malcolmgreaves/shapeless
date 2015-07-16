@@ -17,8 +17,6 @@
 import sbt._
 import Keys._
 
-import com.typesafe.sbt.pgp.PgpKeys._
-
 import com.typesafe.sbt.osgi.SbtOsgi._
 
 import sbtbuildinfo.Plugin._
@@ -26,34 +24,35 @@ import sbtbuildinfo.Plugin._
 import com.typesafe.sbt.SbtGit._
 import GitKeys._
 
-import sbtrelease._
-import sbtrelease.ReleasePlugin._
-import sbtrelease.ReleasePlugin.ReleaseKeys._
-import sbtrelease.ReleaseStateTransformations._
-import sbtrelease.Utilities._
+import com.typesafe.tools.mima.plugin.MimaPlugin.mimaDefaultSettings
+import com.typesafe.tools.mima.plugin.MimaKeys
+import MimaKeys.{previousArtifact, binaryIssueFilters}
 
 object ShapelessBuild extends Build {
 
-  lazy val shapeless = Project(
-    id = "shapeless",
-    base = file("."),
-    aggregate = Seq(shapelessCore, shapelessExamples),
-    settings = commonSettings ++ Seq(
+  lazy val shapeless = (project in file(".")
+    aggregate (core, examples)
+    dependsOn (core, examples, scratch)
+    settings (commonSettings: _*)
+    settings (
       moduleName := "shapeless-root",
 
       (unmanagedSourceDirectories in Compile) := Nil,
       (unmanagedSourceDirectories in Test) := Nil,
 
       publish := (),
-      publishLocal := ()
+      publishLocal := (),
+
+      addCommandAlias("validate", ";test;mima-report-binary-issues;doc")
     )
   )
 
-  lazy val shapelessCore =
-    Project(
-      id = "shapeless-core",
-      base = file("core"),
-      settings = commonSettings ++ Publishing.settings ++ osgiSettings ++ buildInfoSettings ++ releaseSettings ++ Seq(
+  lazy val core = (project
+      settings(
+        commonSettings ++ Publishing.settings ++ osgiSettings ++
+        buildInfoSettings ++ mimaDefaultSettings: _*
+      )
+      settings(
         moduleName := "shapeless",
 
         managedSourceDirectories in Test := Nil,
@@ -73,7 +72,32 @@ object ShapelessBuild extends Build {
           },
 
         mappings in (Compile, packageSrc) <++=
-          (mappings in (Compile, packageSrc) in LocalProject("shapeless-examples")),
+          (mappings in (Compile, packageSrc) in LocalProject("examples")),
+
+        previousArtifact := Some(organization.value %% moduleName.value % "2.2.0"),
+        binaryIssueFilters ++= {
+          import com.typesafe.tools.mima.core._
+          import com.typesafe.tools.mima.core.ProblemFilters._
+
+          // Filtering the methods that were added since the checked version
+          // (these only break forward compatibility, not the backward one)
+          Seq(
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.ops.hlist#LowPriorityRotateLeft.hlistRotateLeft"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.ops.hlist#LowPriorityRotateRight.hlistRotateRight"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.ops.coproduct#LowPriorityRotateLeft.coproductRotateLeft"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.ops.coproduct#LowPriorityRotateRight.coproductRotateRight"),
+            ProblemFilters.exclude[IncompatibleResultTypeProblem]("shapeless.GenericMacros.shapeless$GenericMacros$$mkCoproductCases$1"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.Generic1Macros.shapeless$Generic1Macros$$mkCoproductCases$1"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.SingletonTypeUtils.isValueClass"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.mkHListTypTree"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.reprTypTree"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.mkCompoundTypTree"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.mkCoproductTypTree"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.isAnonOrRefinement"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.mkTypTree"),
+            ProblemFilters.exclude[MissingMethodProblem]("shapeless.CaseClassMacros.isAccessible")
+          )
+        },
 
         OsgiKeys.exportPackage := Seq("shapeless.*;version=${Bundle-Version}"),
         OsgiKeys.importPackage := Seq("""scala.*;version="$<range;[==,=+);$<@>>""""),
@@ -88,29 +112,16 @@ object ShapelessBuild extends Build {
           BuildInfoKey.action("buildTime") {
             System.currentTimeMillis
           }
-        ),
-
-        releaseProcess := Seq[ReleaseStep](
-          checkSnapshotDependencies,
-          inquireVersions,
-          runTest,
-          setReleaseVersion,
-          commitReleaseVersion,
-          tagRelease,
-          publishSignedArtifacts,
-          setNextVersion,
-          commitNextVersion,
-          pushChanges
         )
       )
     )
 
-  lazy val shapelessScratch = Project(
-    id = "shapeless-scratch",
-    base = file("scratch"),
-    dependencies = Seq(shapelessCore),
+  lazy val scratch = (project
+    dependsOn core
+    settings (commonSettings: _*)
+    settings (
+      moduleName := "shapeless-scratch",
 
-    settings = commonSettings ++ Seq(
       libraryDependencies ++= Seq(
         // needs compiler for `scala.tools.reflect.Eval`
         "org.scala-lang" % "scala-compiler" % scalaVersion.value % "provided",
@@ -122,12 +133,12 @@ object ShapelessBuild extends Build {
     )
   )
 
-  lazy val shapelessExamples = Project(
-    id = "shapeless-examples",
-    base = file("examples"),
-    dependencies = Seq(shapelessCore),
+  lazy val examples = (project
+    dependsOn core
+    settings (commonSettings: _*)
+    settings (
+      moduleName := "shapeless-examples",
 
-    settings = commonSettings ++ Seq(
       libraryDependencies ++= Seq(
         // needs compiler for `scala.tools.reflect.Eval`
         "org.scala-lang" % "scala-compiler" % scalaVersion.value % "provided",
@@ -149,26 +160,11 @@ object ShapelessBuild extends Build {
     }
   }
 
-  lazy val publishSignedArtifacts = ReleaseStep(
-    action = st => {
-      val extracted = st.extract
-      val ref = extracted.get(thisProjectRef)
-      extracted.runAggregated(publishSigned in Global in ref, st)
-    },
-    check = st => {
-      // getPublishTo fails if no publish repository is set up.
-      val ex = st.extract
-      val ref = ex.get(thisProjectRef)
-      Classpaths.getPublishTo(ex.get(publishTo in Global in ref))
-      st
-    },
-    enableCrossBuild = true
-  )
-
   def commonSettings =
     Seq(
       organization        := "com.chuusai",
-      scalaVersion        := "2.11.5",
+      scalaVersion        := "2.11.7",
+      crossScalaVersions  := Seq("2.11.7", "2.12.0-M1"),
 
       (unmanagedSourceDirectories in Compile) <<= (scalaSource in Compile)(Seq(_)),
       (unmanagedSourceDirectories in Test) <<= (scalaSource in Test)(Seq(_)),

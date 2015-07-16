@@ -26,8 +26,10 @@ class HListTests {
   import nat._
   import poly._
   import syntax.std.traversable._
+  import syntax.singleton._
   import syntax.typeable._
   import ops.hlist._
+  import ops.record._
 
   type SI = Set[Int] :: HNil
   type OI = Option[Int] :: HNil
@@ -385,25 +387,48 @@ class HListTests {
     val pabp = ap reverse_::: bp
     assertTypedEquals[PABP](p :: a :: b :: p :: HNil, pabp)
 
-    // must compile without requiring an implicit Prepend
-    def prependWithHNil[L <: HList](list: L) = HNil ::: list
-    def prependToHNil[L <: HList](list: L) = list ::: HNil
-    val r1 = prependWithHNil(ap)
-    assertTypedEquals[AP](ap, r1)
-    val r2 = prependToHNil(ap)
-    assertTypedEquals[AP](ap, r2)
-    val r3 = HNil ::: HNil
-    assertTypedEquals[HNil](HNil, r3)
+    {
+      // must compile without requiring an implicit Prepend
+      def prependWithHNil[L <: HList](list: L) = HNil ::: list
+      def prependToHNil[L <: HList](list: L) = list ::: HNil
 
-    // must compile without requiring an implicit ReversePrepend
-    def reversePrependWithHNil[L <: HList](list: L) = HNil reverse_::: list
-    def reversePrependToHNil[L <: HList: Reverse](list: L) = list reverse_::: HNil
-    val r4 = reversePrependWithHNil(ap)
-    assertTypedEquals[AP](ap, r4)
-    val r5 = reversePrependToHNil(ap)
-    assertTypedEquals[Pear :: Apple :: HNil](ap.reverse, r5)
-    val r6 = HNil reverse_::: HNil
-    assertTypedEquals[HNil](HNil, r6)
+      val r1 = prependWithHNil(ap)
+      assertTypedSame[AP](ap, r1)
+      val r2 = prependToHNil(ap)
+      assertTypedSame[AP](ap, r2)
+      val r3 = HNil ::: HNil
+      assertTypedSame[HNil](HNil, r3)
+
+      val r4 = prependWithHNil(pabp)
+      assertTypedSame[PABP](pabp, r4)
+      val r5 = prependToHNil(pabp)
+      assertTypedSame[PABP](pabp, r5)
+    }
+
+    {
+      // must also pass with the default implicit
+      val r1 = HNil ::: ap
+      assertTypedSame[AP](ap, r1)
+      val r2 = ap ::: HNil
+      assertTypedSame[AP](ap, r2)
+
+      val r4 = HNil ::: pabp
+      assertTypedSame[PABP](pabp, r4)
+      val r5 = pabp ::: HNil
+      assertTypedSame[PABP](pabp, r5)
+    }
+
+    {
+      // must compile without requiring an implicit ReversePrepend
+      def reversePrependWithHNil[L <: HList](list: L) = HNil reverse_::: list
+      def reversePrependToHNil[L <: HList : Reverse](list: L) = list reverse_::: HNil
+      val r4 = reversePrependWithHNil(ap)
+      assertTypedSame[AP](ap, r4)
+      val r5 = reversePrependToHNil(ap)
+      assertTypedEquals[Pear :: Apple :: HNil](ap.reverse, r5)
+      val r6 = HNil reverse_::: HNil
+      assertTypedSame[HNil](HNil, r6)
+    }
   }
 
   @Test
@@ -419,6 +444,11 @@ class HListTests {
 
     implicitly[ToSized.Aux[HNil, List, Nothing, _0]]
     implicitly[ToSized.Aux[HNil, List, Int, _0]]
+
+    {
+      implicitly[ToSized.Aux[M[Int] :: HNil, List, M[Int], _1]]
+      implicitly[ToSized.Aux[M[Int] :: HNil, List, M[_], _1]]
+    }
 
     val sizedApap = apap.toSized[List]
     assertEquals(Nat toInt apap.length, sizedApap.length)
@@ -625,8 +655,13 @@ class HListTests {
     val r1 = HNil.to[List]
     assertTypedEquals[List[Nothing]](Nil, r1)
 
-    implicitly[ToList[HNil, Nothing]]
-    implicitly[ToList[HNil, Int]]
+    ToList[HNil, Nothing]
+    ToList[HNil, Int]
+
+    {
+      implicitly[ToTraversable.Aux[M[Int] :: HNil, List, M[Int]]]
+      implicitly[ToTraversable.Aux[M[Int] :: HNil, List, M[_]]]
+    }
 
     val r2 = apap.to[List]
     assertTypedEquals[List[Fruit]](List(a, p, a, p), r2)
@@ -686,6 +721,14 @@ class HListTests {
 
     implicitly[ToTraversable.Aux[HNil, List, Nothing]]
     implicitly[ToTraversable.Aux[HNil, List, Int]]
+
+    {
+      val l1 = (mi :: HNil).toList[M[Int]]
+      val l2 = (mi :: HNil).toList[M[_]]
+
+      assertTypedEquals[List[M[Int]]](List(mi), l1)
+      assertTypedEquals[List[M[_]]](List(mi), l2)
+    }
 
     val fruits1 = apap.toList
     assertTypedEquals[List[Fruit]](List(a, p, a, p), fruits1)
@@ -755,9 +798,14 @@ class HListTests {
     val empty = HNil.to[Array]
     typed[Array[Nothing]](empty)
     assertArrayEquals2(Array[Nothing](), empty)
-    
+
     implicitly[ToTraversable.Aux[HNil, Array, Nothing]]
     implicitly[ToTraversable.Aux[HNil, Array, Int]]
+
+    {
+      implicitly[ToTraversable.Aux[M[Int] :: HNil, Array, M[Int]]]
+      implicitly[ToTraversable.Aux[M[Int] :: HNil, Array, M[_]]]
+    }
 
     val fruits1 = apap.to[Array].map(x => x : Fruit) // Default inferred type is too precise
                                                      // (Product with Serializable with Fruit)
@@ -830,9 +878,19 @@ class HListTests {
     val empty = HNil.toArray
     typed[Array[Nothing]](empty)
     assertArrayEquals2(Array[Nothing](), empty)
-    
-    implicitly[ToArray[HNil, Nothing]]
-    implicitly[ToArray[HNil, Int]]
+
+    ToArray[HNil, Nothing]
+    ToArray[HNil, Int]
+
+    {
+      val a1 = (mi :: HNil).toArray[M[Int]]
+      val a2 = (mi :: HNil).toArray[M[_]]
+
+      typed[Array[M[Int]]](a1)
+      typed[Array[M[_]]](a2)
+      assertArrayEquals2(Array[M[Int]](mi), a1)
+      assertArrayEquals2(Array[M[_]](mi), a2)
+    }
 
     val fruits1 = apap.toArray[Fruit]
     typed[Array[Fruit]](fruits1)
@@ -851,6 +909,11 @@ class HListTests {
     val stuff = l1.toArray
     typed[Array[Any]](stuff)
     assertArrayEquals2(Array(1, "foo", 2, 3), stuff)
+
+    val ssl = "foo" :: "bar" :: 1L :: HNil
+    val ssla = ssl.toArray
+    typed[Array[Any]](ssla)
+    assertArrayEquals2(Array("foo", "bar", 1L), ssla)
 
     val stuff2 = stuff.toHList[ISII]
     assertTrue(stuff2.isDefined)
@@ -1897,7 +1960,7 @@ class HListTests {
     // key/value lengths must match up
     illTyped("orig.tail.values.zipWithKeys(orig.keys)")
     illTyped("orig.values.zipWithKeys(orig.keys.tail)")
-    
+
     // Explicit type argument
     {
       val result = orig.values.zipWithKeys[HList.`"intField", "boolField"`.T]
@@ -2559,5 +2622,136 @@ class HListTests {
     // Mix of standard and literal types
 
     typed[HList.`2, String, true`.T](2.narrow :: "a" :: true.narrow :: HNil)
+  }
+
+  object Foo extends ProductArgs {
+    def applyProduct[L <: HList](args: L): L = args
+  }
+
+  @Test
+  def testProductArgs {
+    val l = Foo(23, "foo", true)
+    typed[Int :: String :: Boolean :: HNil](l)
+
+    val v1 = l.head
+    typed[Int](v1)
+    assertEquals(23, v1)
+
+    val v2 = l.tail.head
+    typed[String](v2)
+    assertEquals("foo", v2)
+
+    val v3 = l.tail.tail.head
+    typed[Boolean](v3)
+    assertEquals(true, v3)
+
+    val v4 = l.tail.tail.tail
+    typed[HNil](v4)
+
+    illTyped("""
+      r.tail.tail.tail.head
+    """)
+  }
+
+  object SFoo extends SingletonProductArgs {
+    def applyProduct[L <: HList](args: L): L = args
+  }
+
+  case class Quux(i: Int, s: String, b: Boolean)
+
+  object selectAll extends SingletonProductArgs {
+    class Apply[K <: HList] {
+      def from[T, R <: HList, S <: HList, Out](t: T)
+        (implicit
+          gen: LabelledGeneric.Aux[T, R],
+          sel: SelectAll.Aux[R, K, S],
+          tp: Tupler.Aux[S, Out]
+        ): Out =
+        tp(sel(gen.to(t)))
+    }
+
+    def applyProduct[K <: HList](keys: K) = new Apply[K]
+  }
+
+  trait NonSingletonHNilTC[T]
+  object NonSingletonHNilTC {
+    def apply[T](t: T)(implicit i: NonSingletonHNilTC[T]): NonSingletonHNilTC[T] = i
+
+    implicit val nsHNilTC: NonSingletonHNilTC[HNil] = new NonSingletonHNilTC[HNil] {}
+  }
+
+  @Test
+  def testSingletonProductArgs {
+    object Obj
+
+    val l = SFoo(23, "foo", 'bar, Obj, true)
+    typed[Witness.`23`.T :: Witness.`"foo"`.T :: Witness.`'bar`.T :: Obj.type :: Witness.`true`.T :: HNil](l)
+
+    // Annotations on the LHS here and subsequently, otherwise scalac will
+    // widen the RHS to a non-singleton type.
+    val v1: Witness.`23`.T = l.head
+    assertEquals(23, v1)
+
+    val v2: Witness.`"foo"`.T = l.tail.head
+    assertEquals("foo", v2)
+
+    val v3: Witness.`'bar`.T = l.tail.tail.head
+    assertEquals('bar, v3)
+
+    val v4: Obj.type = l.tail.tail.tail.head
+    assertEquals(Obj, v4)
+
+    val v5: Witness.`true`.T = l.tail.tail.tail.tail.head
+    assertEquals(true, v5)
+
+    val v6 = l.tail.tail.tail.tail.tail
+    typed[HNil](v6)
+
+    illTyped("""
+      r.tail.tail.tail.tail.tail.tail.head
+    """)
+
+    // Verify that we infer HNil rather than HNil.type at the end
+    NonSingletonHNilTC(SFoo(23).tail)
+    NonSingletonHNilTC(SFoo())
+
+    val quux = Quux(23, "foo", true)
+    val ib = selectAll('i, 'b).from(quux)
+    typed[(Int, Boolean)](ib)
+    assertEquals((23, true), ib)
+  }
+
+  implicit class Interpolator(val sc: StringContext) {
+    class Args extends ProductArgs {
+      def applyProduct[L <: HList](l: L): L = l
+    }
+
+    val hlist: Args = new Args
+  }
+
+  @Test
+  def testStringInterpolator {
+    val (i, s, b) = (23, "foo", true)
+    val l = hlist"Int: $i, String: $s, Boolean: $b"
+    typed[Int :: String :: Boolean :: HNil](l)
+
+    val v1 = l.head
+    typed[Int](v1)
+    assertEquals(23, v1)
+
+    val v2 = l.tail.head
+    typed[String](v2)
+    assertEquals("foo", v2)
+
+    val v3 = l.tail.tail.head
+    typed[Boolean](v3)
+    assertEquals(true, v3)
+
+    val v4 = l.tail.tail.tail
+    typed[HNil](v4)
+
+    illTyped("""
+      r.tail.tail.tail.head
+    """)
   }
 }

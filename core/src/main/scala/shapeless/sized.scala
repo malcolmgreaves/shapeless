@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-13 Miles Sabin 
+ * Copyright (c) 2011-15 Miles Sabin 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,9 @@ import scala.collection.generic.{ CanBuildFrom, IsTraversableLike }
  * 
  * @author Miles Sabin
  */
-final class Sized[+Repr, L <: Nat] private (val unsized : Repr) extends AnyVal
+final class Sized[+Repr, L <: Nat] private (val unsized : Repr) extends AnyVal {
+  override def toString = unsized.toString
+}
 
 /**
  * Carrier for `Sized` operations.
@@ -201,7 +203,7 @@ object Sized extends LowPrioritySized {
  *
  * @author Alexandre Archambault
  */
-trait AdditiveCollection[Repr]
+trait AdditiveCollection[Repr] extends Serializable
 
 object AdditiveCollection {
   import scala.collection.immutable.Queue

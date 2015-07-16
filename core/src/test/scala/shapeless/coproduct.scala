@@ -28,6 +28,10 @@ class CoproductTests {
   type ISB = Int :+: String :+: Boolean :+: CNil
   type III = Int :+: Int :+: Int :+: CNil
 
+  case class Foo(msg: String)
+  case class Bar(msg: String)
+  type FBI = Foo :+: Bar :+: Int :+: CNil
+
   trait Fruit
   case class Apple() extends Fruit
   case class Pear() extends Fruit
@@ -135,6 +139,19 @@ class CoproductTests {
     illTyped("""
       foo3.select[Double]
     """)
+
+    val fbi1 = Coproduct[FBI](Foo("hi"))
+    val fbi2 = Coproduct[FBI](Bar("hi"))
+    val fbi3 = Coproduct[FBI](23)
+
+    val sel4a = fbi1.select[Foo]
+    assertTypedEquals[Option[Foo]](Some(Foo("hi")), sel4a)
+
+    val sel4b = fbi2.select[Bar]
+    assertTypedEquals[Option[Bar]](Some(Bar("hi")), sel4b)
+
+    val sel4c = fbi3.select[Int]
+    assertTypedEquals[Option[Int]](Some(23), sel4c)
   }
 
   @Test
@@ -304,9 +321,9 @@ class CoproductTests {
 
     // key/value lengths must match up
     illTyped("u1.zipWithKeys(uKeys.tail)")
-    
+
     // Explicit type argument
-    
+
     {
       val u1 = Coproduct[ISB](23).zipWithKeys[HList.`'i, 's, 'b`.T]
       val v1 = u1.get('i)
@@ -314,7 +331,7 @@ class CoproductTests {
       assertEquals(Some(23), v1)
       assertEquals(None, u1.get('s))
     }
-    
+
     {
       val u2 = Coproduct[ISB]("foo").zipWithKeys[HList.`'i, 's, 'b`.T]
       val v2 = u2.get('s)
@@ -322,19 +339,19 @@ class CoproductTests {
       assertEquals(Some("foo"), v2)
       assertEquals(None, u2.get('b))
     }
-    
+
     {
       val u3 = Coproduct[ISB](true).zipWithKeys[HList.`'i, 's, 'b`.T]
       val v3 = u3.get('b)
       typed[Option[Boolean]](v3)
       assertEquals(Some(true), v3)
       assertEquals(None, u3.get('i))
-      
+
       illTyped("v3.get('d)")
     }
 
     illTyped(" Coproduct[ISB](true).zipWithKeys[HList.`'i, 's, 'b, 'd`.T] ")
-    
+
   }
 
   @Test
@@ -342,16 +359,18 @@ class CoproductTests {
     val (one, two, abc, xyz) =
       (Coproduct[ISB](1), Coproduct[ISB](2), Coproduct[ISB]("abc"), Coproduct[ISB]("xyz"))
 
-    def assertPOEquals(expected: Option[Int], l: ISB, r: ISB)(implicit po: PartialOrdering[ISB]) =
-      assertEquals(s"${l} ${r}", expected, po.tryCompare(l, r))
+    def assertPOEquals(expected: Option[Int], l: ISB, r: ISB)(implicit po: PartialOrdering[ISB]) = {
+      val actual =  po.tryCompare(l, r) map { i => Some(if (i < 0) -1 else if (i > 0) 1 else 0) }
+      assertEquals(s"${l} ${r}", expected, actual getOrElse None)
+    }
 
     assertPOEquals(Some(0),  one, one)
     assertPOEquals(Some(-1), one, two)
     assertPOEquals(Some(1),  two, one)
 
     assertPOEquals(Some(0),  abc, abc)
-    assertPOEquals(Some(-23), abc, xyz)
-    assertPOEquals(Some(23),  xyz, abc)
+    assertPOEquals(Some(-1), abc, xyz)
+    assertPOEquals(Some(1),  xyz, abc)
 
     assertPOEquals(None, one, abc)
     assertPOEquals(None, abc, one)
@@ -566,6 +585,38 @@ class CoproductTests {
       val r7 = in4.rotateLeft[_6]
       assertTypedEquals[D :+: C :+: I :+: S :+: CNil](Coproduct[D :+: C :+: I :+: S :+: CNil](1), r7)
     }
+
+    {
+      type C1 = Int :+: Boolean :+: String :+: Int :+: CNil
+      type C2 = Boolean :+: String :+: Int :+: Int :+: CNil
+      type C3 = String :+: Int :+: Int :+: Boolean :+: CNil
+      type C4 = Int :+: Int :+: Boolean :+: String :+: CNil
+
+      val i1: C1 = Inl(1)
+      val i2: C2 = Inr(Inr(Inr(Inl(1))))
+      val i3: C3 = Inr(Inr(Inl(1)))
+      val i4: C4 = Inr(Inl(1))
+
+      assertTypedEquals(i1, i1.rotateLeft(0))
+      assertTypedEquals(i2, i1.rotateLeft(1))
+      assertTypedEquals(i3, i1.rotateLeft(2))
+      assertTypedEquals(i4, i1.rotateLeft(3))
+
+      assertTypedEquals(i2, i2.rotateLeft(0))
+      assertTypedEquals(i3, i2.rotateLeft(1))
+      assertTypedEquals(i4, i2.rotateLeft(2))
+      assertTypedEquals(i1, i2.rotateLeft(3))
+
+      assertTypedEquals(i3, i3.rotateLeft(0))
+      assertTypedEquals(i4, i3.rotateLeft(1))
+      assertTypedEquals(i1, i3.rotateLeft(2))
+      assertTypedEquals(i2, i3.rotateLeft(3))
+
+      assertTypedEquals(i4, i4.rotateLeft(0))
+      assertTypedEquals(i1, i4.rotateLeft(1))
+      assertTypedEquals(i2, i4.rotateLeft(2))
+      assertTypedEquals(i3, i4.rotateLeft(3))
+    }
   }
 
   @Test
@@ -682,6 +733,38 @@ class CoproductTests {
       val r7 = in4.rotateRight[_6]
       assertTypedEquals[D :+: C :+: I :+: S :+: CNil](Coproduct[D :+: C :+: I :+: S :+: CNil](1), r7)
     }
+
+    {
+      type C1 = Int :+: Boolean :+: String :+: Int :+: CNil
+      type C2 = Int :+: Int :+: Boolean :+: String :+: CNil
+      type C3 = String :+: Int :+: Int :+: Boolean :+: CNil
+      type C4 = Boolean :+: String :+: Int :+: Int :+: CNil
+
+      val i1: C1 = Inl(1)
+      val i2: C2 = Inr(Inl(1))
+      val i3: C3 = Inr(Inr(Inl(1)))
+      val i4: C4 = Inr(Inr(Inr(Inl(1))))
+
+      assertTypedEquals(i1, i1.rotateRight(0))
+      assertTypedEquals(i2, i1.rotateRight(1))
+      assertTypedEquals(i3, i1.rotateRight(2))
+      assertTypedEquals(i4, i1.rotateRight(3))
+
+      assertTypedEquals(i2, i2.rotateRight(0))
+      assertTypedEquals(i3, i2.rotateRight(1))
+      assertTypedEquals(i4, i2.rotateRight(2))
+      assertTypedEquals(i1, i2.rotateRight(3))
+
+      assertTypedEquals(i3, i3.rotateRight(0))
+      assertTypedEquals(i4, i3.rotateRight(1))
+      assertTypedEquals(i1, i3.rotateRight(2))
+      assertTypedEquals(i2, i3.rotateRight(3))
+
+      assertTypedEquals(i4, i4.rotateRight(0))
+      assertTypedEquals(i1, i4.rotateRight(1))
+      assertTypedEquals(i2, i4.rotateRight(2))
+      assertTypedEquals(i3, i4.rotateRight(3))
+    }
   }
 
   @Test
@@ -706,6 +789,55 @@ class CoproductTests {
 
     val r3 = Coproduct[Int :+: String :+: CNil]("foo").tail
     assertTypedEquals[Option[String :+: CNil]](Some(Coproduct[String :+: CNil]("foo")), r3)
+  }
+
+  @Test
+  def testPrepend: Unit = {
+    type S = String; type I = Int; type D = Double; type C = Char
+    val in1 = Coproduct[I :+: CNil](1)
+    val in2 = Coproduct[I :+: S :+: CNil](1)
+    val in3 = Coproduct[I :+: S :+: D :+: CNil](1)
+    val in4 = Coproduct[I :+: S :+: D :+: C :+: CNil](1)
+
+    {
+      // Prepending CNil - checking for same-ness, not only equality
+      val r1 = Prepend[CNil, I :+: CNil].apply(Right(in1))
+      assertTypedSame(in1, r1)
+      val r2 = Prepend[CNil, I :+: S :+: CNil].apply(Right(in2))
+      assertTypedSame(in2, r2)
+      val r3 = Prepend[CNil, I :+: S :+: D :+: CNil].apply(Right(in3))
+      assertTypedSame(in3, r3)
+      val r4 = Prepend[CNil, I :+: S :+: D :+: C :+: CNil].apply(Right(in4))
+      assertTypedSame(in4, r4)
+    }
+
+    {
+      // Appending CNil - checking for same-ness, not only equality
+      val r1 = Prepend[I :+: CNil, CNil].apply(Left(in1))
+      assertTypedSame(in1, r1)
+      val r2 = Prepend[I :+: S :+: CNil, CNil].apply(Left(in2))
+      assertTypedSame(in2, r2)
+      val r3 = Prepend[I :+: S :+: D :+: CNil, CNil].apply(Left(in3))
+      assertTypedSame(in3, r3)
+      val r4 = Prepend[I :+: S :+: D :+: C :+: CNil, CNil].apply(Left(in4))
+      assertTypedSame(in4, r4)
+    }
+
+    {
+      val r11_1 = Prepend[I :+: CNil, I :+: CNil].apply(Left(in1))
+      assertTypedEquals(Inl(1), r11_1)
+      val r11_2 = Prepend[I :+: CNil, I :+: CNil].apply(Right(in1))
+      assertTypedEquals(Inr(Inl(1)), r11_2)
+      val r12_1 = Prepend[I :+: CNil, I :+: S :+: CNil].apply(Left(in1))
+      assertTypedEquals(Inl(1), r12_1)
+      val r12_2 = Prepend[I :+: CNil, I :+: S :+: CNil].apply(Right(in2))
+      assertTypedEquals(Inr(Inl(1)), r12_2)
+
+      val r34_3 = Prepend[I :+: S :+: D :+: CNil, I :+: S :+: D :+: C :+: CNil].apply(Left(in3))
+      assertTypedEquals(Inl(1), r34_3)
+      val r34_4 = Prepend[I :+: S :+: D :+: CNil, I :+: S :+: D :+: C :+: CNil].apply(Right(in4))
+      assertTypedEquals(Inr(Inr(Inr(Inl(1)))), r34_4)
+    }
   }
 
   @Test
@@ -870,17 +1002,35 @@ class CoproductTests {
 
   @Test
   def testReverse {
-    type S = String; type I = Int; type D = Double; type C = Char
-    type SI = S :+: I :+: CNil; type IS = I :+: S :+: CNil
+    {
+      type S = String; type I = Int; type D = Double; type C = Char
+      type SI = S :+: I :+: CNil; type IS = I :+: S :+: CNil
 
-    val r1 = Coproduct[I :+: CNil](1).reverse
-    assertTypedEquals[I :+: CNil](Coproduct[I :+: CNil](1), r1)
+      val r1 = Coproduct[I :+: CNil](1).reverse
+      assertTypedEquals[I :+: CNil](Coproduct[I :+: CNil](1), r1)
 
-    val r2 = Coproduct[IS](1).reverse
-    assertTypedEquals[SI](Coproduct[SI](1), r2)
+      val r2 = Coproduct[IS](1).reverse
+      assertTypedEquals[SI](Coproduct[SI](1), r2)
 
-    val r3 = Coproduct[IS]("foo").reverse
-    assertTypedEquals[SI](Coproduct[SI]("foo"), r3)
+      val r3 = Coproduct[IS]("foo").reverse
+      assertTypedEquals[SI](Coproduct[SI]("foo"), r3)
+    }
+
+    {
+      type C = Int :+: String :+: Double :+: Int :+: Boolean :+: CNil
+
+      val c1: C = Inl(1)
+      val c2: C = Inr(Inl("str"))
+      val c3: C = Inr(Inr(Inl(3.0)))
+      val c4: C = Inr(Inr(Inr(Inl(4))))
+      val c5: C = Inr(Inr(Inr(Inr(Inl(true)))))
+
+      assertTypedEquals(c1, c1.reverse.reverse)
+      assertTypedEquals(c2, c2.reverse.reverse)
+      assertTypedEquals(c3, c3.reverse.reverse)
+      assertTypedEquals(c4, c4.reverse.reverse)
+      assertTypedEquals(c5, c5.reverse.reverse)
+    }
   }
 
   @Test
@@ -1463,7 +1613,7 @@ class CoproductTests {
     assertTypedEquals[I :+: S :+: CNil](is0, r2_0)
 
     // These two are different from testRemoveInverse
-    
+
     val u3 = RemoveLast[I :+: S :+: I :+: CNil, I]
     val r3 = u3.inverse(Left(2))
     assertTypedEquals[I :+: S :+: I :+: CNil](iis, r3)
@@ -1496,7 +1646,7 @@ class CoproductTests {
     val c1_2 = c1_0.embed[S3]
     assertTypedEquals[S3](c1_2, Coproduct[S3](5))
     assertTypedEquals[S1](c1_0, c1_2.deembed[S1].right.get)
-    
+
     val c2_0 = Coproduct[S2]("toto")
     val c2 = c2_0.embed[S3]
     assertTypedEquals[S3](c2, Coproduct[S3]("toto"))
@@ -1506,7 +1656,7 @@ class CoproductTests {
 
     // See https://github.com/milessabin/shapeless/issues/253
     illTyped("Coproduct[S5](3).embed[S1]")
-    
+
     // See https://github.com/milessabin/shapeless/issues/253#issuecomment-59648119
     {
       type II = Int :+: Int :+: CNil
@@ -1523,14 +1673,14 @@ class CoproductTests {
       assert(c2 != c1_0)
     }
   }
-  
+
   @Test
   def testCoproductTypeSelector {
     import syntax.singleton._
-    
+
     {
       type C = Coproduct.` `.T
-      
+
       implicitly[C =:= CNil]
     }
 
@@ -1587,5 +1737,18 @@ class CoproductTests {
       typed[C](Inr(Inl("a")))
       typed[C](Inr(Inr(Inl(true.narrow))))
     }
+  }
+}
+
+package CoproductTestAux {
+  // See https://github.com/milessabin/shapeless/issues/328
+  case class Foo(msg: String)
+  case class Bar(msg: String)
+
+  object Stuff {
+
+    type Blah = Foo :+: Bar :+: Int :+: CNil
+    val t = Coproduct[Blah](Foo("hi"))
+    t.select[Foo]
   }
 }

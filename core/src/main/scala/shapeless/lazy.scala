@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-4 Miles Sabin
+ * Copyright (c) 2013-15 Miles Sabin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import scala.language.experimental.macros
 import scala.collection.immutable.ListMap
 import scala.reflect.macros.whitebox
 
-trait Lazy[+T] {
+trait Lazy[+T] extends Serializable {
   val value: T
 
   def map[U](f: T => U): Lazy[U] = Lazy { f(value) }
@@ -44,31 +44,35 @@ object Lazy {
 
   def values[T <: HList](implicit lv: Lazy[Values[T]]): T = lv.value.values
 
-  implicit def mkLazy[I]: Lazy[I] = macro LazyMacros.mkLazyImpl
+  implicit def mkLazy[I]: Lazy[I] = macro LazyMacros.mkLazyImpl[I]
+}
+
+object lazily {
+  def apply[T](implicit lv: Lazy[T]): T = lv.value
 }
 
 class LazyMacros(val c: whitebox.Context) {
   import c.universe._
   import c.ImplicitCandidate
 
-  def mkLazyImpl: Tree = {
-    val tpe = c.openImplicits.head match {
-      case ImplicitCandidate(_, _, TypeRef(_, _, List(tpe)), _) =>
-        // Replace all type variables with wildcards ...
-        tpe.map { t => if(t.typeSymbol.isParameter) WildcardType else t.dealias }
+  def mkLazyImpl[I](implicit iTag: WeakTypeTag[I]): Tree = {
+    (c.openImplicits.headOption, iTag.tpe.dealias) match {
+      case (Some(ImplicitCandidate(_, _, TypeRef(_, _, List(tpe)), _)), _) =>
+        LazyMacros.deriveInstance(c)(tpe.map(_.dealias))
+      case (None, tpe) if tpe.typeSymbol.isParameter =>       // Workaround for presentation compiler
+        q"null.asInstanceOf[_root_.shapeless.Lazy[Nothing]]"
+      case (None, tpe) =>                                     // Non-implicit invocation
+        LazyMacros.deriveInstance(c)(tpe)
       case _ =>
         c.abort(c.enclosingPosition, s"Bad Lazy materialization $c.openImplicits.head")
     }
-
-    val (tree, actualType) = LazyMacros.deriveInstance(c)(tpe)
-    q"_root_.shapeless.Lazy[$actualType]($tree)"
   }
 }
 
 object LazyMacros {
   var dcRef: Option[DerivationContext] = None
 
-  def deriveInstance(c: whitebox.Context)(tpe: c.Type): (c.Tree, c.Type) = {
+  def deriveInstance(c: whitebox.Context)(tpe: c.Type): c.Tree = {
     val (dc, root) =
       dcRef match {
         case None =>
@@ -150,7 +154,7 @@ trait DerivationContext extends CaseClassMacros {
     dict = dict-TypeWrapper(d.instTpe)
   }
 
-  def deriveInstance(instTpe: Type, root: Boolean): (Tree, Type) = {
+  def deriveInstance(instTpe: Type, root: Boolean): Tree = {
     val instTree =
       dict.get(TypeWrapper(instTpe)) match {
         case Some(d) => (d.ident, d.actualTpe)
@@ -185,7 +189,24 @@ trait DerivationContext extends CaseClassMacros {
           (tree, actualTpe)
       }
 
-    if(root) mkInstances(instTpe) else instTree
+    val (tree, actualType) = if(root) mkInstances(instTpe) else instTree
+    q"_root_.shapeless.Lazy[$actualType]($tree)"
+  }
+
+  // Workaround for https://issues.scala-lang.org/browse/SI-5465
+  class StripUnApplyNodes extends Transformer {
+    val global = c.universe.asInstanceOf[scala.tools.nsc.Global]
+    import global.nme
+
+    override def transform(tree: Tree): Tree = {
+      super.transform {
+        tree match {
+          case UnApply(Apply(Select(qual, nme.unapply | nme.unapplySeq), List(Ident(nme.SELECTOR_DUMMY))), args) =>
+            Apply(transform(qual), transformTrees(args))
+          case t => t
+        }
+      }
+    }
   }
 
   def mkInstances(primaryTpe: Type): (Tree, Type) = {
@@ -196,7 +217,8 @@ trait DerivationContext extends CaseClassMacros {
     val instTrees: List[Tree] =
       instances.map { instance =>
         import instance._
-        val cleanInst = c.untypecheck(c.internal.substituteSymbols(inst, from, to))
+        val cleanInst0 = c.untypecheck(c.internal.substituteSymbols(inst, from, to))
+        val cleanInst = new StripUnApplyNodes().transform(cleanInst0)
         q"""lazy val $name: $actualTpe = $cleanInst.asInstanceOf[$actualTpe]"""
       }
 
@@ -206,7 +228,7 @@ trait DerivationContext extends CaseClassMacros {
 
     val tree =
       q"""
-        class $clsName {
+        final class $clsName extends _root_.scala.Serializable {
           ..$instTrees
         }
         (new $clsName).$primaryNme

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-14 Miles Sabin
+ * Copyright (c) 2011-15 Miles Sabin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,8 @@ import scala.annotation.tailrec
  *
  * @author Miles Sabin
  */
-final class HListOps[L <: HList](l : L) {
+final class HListOps[L <: HList](l : L) extends Serializable {
+  import ops.adjoin.Adjoin
   import ops.hlist._
 
   /**
@@ -569,4 +570,9 @@ final class HListOps[L <: HList](l : L) {
   class PatchAux[N <: Nat, M <: Nat]{
     def apply[In <: HList](in: In)(implicit patcher: Patcher[N, M, L, In]): patcher.Out = patcher(l, in)
   }
+
+  /**
+   * Adjoins the elements of this `HList` by flattening any `HList` elements.
+   */
+  def adjoined(implicit adjoin: Adjoin[L]): adjoin.Out = adjoin(l)
 }

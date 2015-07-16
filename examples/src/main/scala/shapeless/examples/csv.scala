@@ -28,13 +28,13 @@ import scala.util.{Try,Success,Failure}
  * */
 
 // The class to serialize or deserialize
-case class Person(name: String, surname: String, age: Int)
+case class Person(name: String, surname: String, age: Int, id: Option[Int])
 
 object CSVExample extends App {
 
   import CSVConverter._
 
-  val input = """John,Carmack,23
+  val input = """John,Carmack,23,0
 Brian,Fargo,35
 Markus,Persson,32"""
 
@@ -53,7 +53,7 @@ trait CSVConverter[T] {
   def to(t: T): String
 }
 
-/** Isntances of the CSVConverter trait */
+/** Instances of the CSVConverter trait */
 object CSVConverter {
   def apply[T](implicit st: Lazy[CSVConverter[T]]): CSVConverter[T] = st.value
 
@@ -118,6 +118,28 @@ object CSVConverter {
           scv.value.to(ft.head) ++ "," ++ sct.value.to(ft.tail)
         }
       }
+
+  implicit def deriveHConsOption[V, T <: HList]
+  (implicit scv: Lazy[CSVConverter[V]], sct: Lazy[CSVConverter[T]])
+  : CSVConverter[Option[V] :: T] =
+    new CSVConverter[Option[V] :: T] {
+
+      def from(s: String): Try[Option[V] :: T] = s.span(_ != ',') match {
+        case (before,after) =>
+          (for {
+            front <- scv.value.from(before)
+            back <- sct.value.from(if (after.isEmpty) after else after.tail)
+          } yield Some(front) :: back).orElse {
+            sct.value.from(s).map(None :: _)
+          }
+
+        case _ => fail("Cannot convert '" ++ s ++ "' to HList")
+      }
+
+      def to(ft: Option[V] :: T): String = {
+        ft.head.map(scv.value.to(_) ++ ",").getOrElse("") ++ sct.value.to(ft.tail)
+      }
+    }
 
 
   // Anything with a Generic

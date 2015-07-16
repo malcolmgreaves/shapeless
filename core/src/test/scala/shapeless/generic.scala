@@ -21,6 +21,7 @@ import org.junit.Assert._
 
 import ops.{ hlist => hl, coproduct => cp }
 import testutil.assertTypedEquals
+import test.illTyped
 
 package GenericTestsAux {
   sealed trait Fruit
@@ -66,6 +67,8 @@ package GenericTestsAux {
 
   case class Salary(salary : Double)
 
+  case class PersonWithPseudonims(name: String, nicks: String*)
+
   trait starLP extends Poly1 {
     implicit def default[T] = at[T](identity)
   }
@@ -105,6 +108,20 @@ package GenericTestsAux {
     lazy val prev = prev0
     lazy val next = next0
   }
+
+  sealed trait Xor[+A, +B]
+  case class Left[+LA](a: LA) extends Xor[LA, Nothing]
+  case class Right[+RB](b: RB) extends Xor[Nothing, RB]
+
+  sealed trait Base[BA, BB]
+  case class Swap[SA, SB](a: SA, b: SB) extends Base[SB, SA]
+
+  sealed trait Overlapping
+  sealed trait OA extends Overlapping
+  case class OAC(s: String) extends OA
+  sealed trait OB extends Overlapping
+  case class OBC(s: String) extends OB
+  case class OAB(i: Int) extends OA with OB
 }
 
 class GenericTests {
@@ -129,6 +146,20 @@ class GenericTests {
 
     val p1 = gen.from(p0)
     typed[Person](p1)
+    assertEquals(p, p1)
+  }
+
+  @Test
+  def testProductVarargs {
+    val p = PersonWithPseudonims("Joe Soap", "X", "M", "Z")
+    val gen = Generic[PersonWithPseudonims]
+
+    val p0 = gen.to(p)
+    typed[String :: Seq[String] :: HNil](p0)
+    assertEquals("Joe Soap" :: Seq("X", "M", "Z") :: HNil, p0)
+
+    val p1 = gen.from(p0)
+    typed[PersonWithPseudonims](p1)
     assertEquals(p, p1)
   }
 
@@ -240,6 +271,17 @@ class GenericTests {
 
     val s1 = gen.from(s0)
     typed[AbstractSingle](s1)
+  }
+
+  @Test
+  def testOverlappingCoproducts {
+    val gen = Generic[Overlapping]
+    val o: Overlapping = OAB(1)
+    val o0 = gen.to(o)
+    typed[OAB :+: OAC :+: OBC :+: CNil](o0)
+
+    val o1 = gen.from(o0)
+    typed[Overlapping](o1)
   }
 
   @Test
@@ -358,6 +400,32 @@ class GenericTests {
   }
 
   @Test
+  def testParametrzedSubset {
+    val l = Left(23)
+    val r = Right(true)
+    type IB = Left[Int] :+: Right[Boolean] :+: CNil
+
+    val gen = Generic[Xor[Int, Boolean]]
+
+    val c0 = gen.to(l)
+    assertTypedEquals[IB](Inl(l), c0)
+
+    val c1 = gen.to(r)
+    assertTypedEquals[IB](Inr(Inl(r)), c1)
+  }
+
+  @Test
+  def testParametrizedPermute {
+    val s = Swap(23, true)
+    type IB = Swap[Int, Boolean] :+: CNil
+
+    val gen = Generic[Base[Boolean, Int]]
+
+    val s0 = gen.to(s)
+    assertTypedEquals[IB](Inl(s), s0)
+  }
+
+  @Test
   def testAbstractNonCC {
     val ncca = new NonCCA(23, "foo")
     val nccb = new NonCCB(true, 2.0)
@@ -462,6 +530,9 @@ class GenericTests {
     illTyped(" IsTuple[Fruit] ")
     illTyped(" IsTuple[Record.`'i -> Int, 's -> String`.T] ")
     illTyped(" IsTuple[Union.`'i -> Int, 's -> String`.T] ")
+    illTyped(" IsTuple[Int] ")
+    illTyped(" IsTuple[String] ")
+    illTyped(" IsTuple[Array[Int]] ")
   }
 
   @Test
@@ -484,6 +555,9 @@ class GenericTests {
     illTyped(" HasProductGeneric[Fruit] ")
     illTyped(" HasProductGeneric[Record.`'i -> Int, 's -> String`.T] ")
     illTyped(" HasProductGeneric[Union.`'i -> Int, 's -> String`.T] ")
+    illTyped(" HasProductGeneric[Int] ")
+    illTyped(" HasProductGeneric[String] ")
+    illTyped(" HasProductGeneric[Array[Int]] ")
   }
 
   @Test
@@ -504,6 +578,25 @@ class GenericTests {
     illTyped(" HasCoproductGeneric[Person] ")
     illTyped(" HasCoproductGeneric[Record.`'i -> Int, 's -> String`.T] ")
     illTyped(" HasCoproductGeneric[Union.`'i -> Int, 's -> String`.T] ")
+    illTyped(" HasCoproductGeneric[Int] ")
+    illTyped(" HasCoproductGeneric[String] ")
+    illTyped(" HasCoproductGeneric[Array[Int]] ")
+  }
+
+  @Test
+  def testNonGeneric {
+    import record._
+    import union._
+
+    illTyped(" Generic[Int] ")
+    illTyped(" Generic[Array[Int]] ")
+    illTyped(" Generic[String] ")
+    illTyped(" Generic[HNil] ")
+    illTyped(" Generic[Int :: String :: HNil] ")
+    illTyped(" Generic[CNil] ")
+    illTyped(" Generic[Int :+: String :+: CNil] ")
+    illTyped(" Generic[Record.`'i -> Int, 's -> String`.T] ")
+    illTyped(" Generic[Union.`'i -> Int, 's -> String`.T] ")
   }
 
   sealed trait Color
@@ -611,4 +704,383 @@ package GenericTestsAux2 {
       implicitly[Bar[wrapper.Color]]
     }
   }
+
+  // This should compile correctly, however, the corresponding pattern match
+  // falls foul of https://issues.scala-lang.org/browse/SI-9220
+  /*
+  object Outer5 {
+    trait Command
+    object Command {
+      sealed trait Execution extends Command
+    }
+
+    case class Buzz() extends Command.Execution
+    case class Door() extends Command.Execution
+
+    Generic[Command.Execution]
+  }
+  */
+}
+
+object MixedCCNonCCNested {
+  // Block local
+  {
+    object T1{
+      sealed abstract class Tree
+      final case class Node(left: Tree, right: Tree, v: Int) extends Tree
+      case object Leaf extends Tree
+    }
+
+    Generic[T1.Tree]
+    import T1._
+    Generic[Tree]
+
+    sealed trait A
+    sealed case class B(i: Int, s: String) extends A
+    case object C extends A
+    sealed trait D extends A
+    final case class E(a: Double, b: Option[Float]) extends D
+    case object F extends D
+    sealed abstract class Foo extends D
+    case object Baz extends Foo
+    final class Bar extends Foo
+    final class Baz(val i1: Int, val s1: String) extends Foo
+
+    Generic[A]
+    Generic[B]
+    Generic[C.type]
+    Generic[D]
+    Generic[E]
+    Generic[F.type]
+    Generic[Foo]
+    Generic[Baz.type]
+    Generic[Bar]
+    Generic[Baz]
+  }
+
+  def methodLocal: Unit = {
+    object T1{
+      sealed abstract class Tree
+      final case class Node(left: Tree, right: Tree, v: Int) extends Tree
+      case object Leaf extends Tree
+    }
+
+    Generic[T1.Tree]
+    import T1._
+    Generic[Tree]
+
+    sealed trait A
+    sealed case class B(i: Int, s: String) extends A
+    case object C extends A
+    sealed trait D extends A
+    final case class E(a: Double, b: Option[Float]) extends D
+    case object F extends D
+    sealed abstract class Foo extends D
+    case object Baz extends Foo
+    final class Bar extends Foo
+    final class Baz(val i1: Int, val s1: String) extends Foo
+
+    Generic[A]
+    Generic[B]
+    Generic[C.type]
+    Generic[D]
+    Generic[E]
+    Generic[F.type]
+    Generic[Foo]
+    Generic[Baz.type]
+    Generic[Bar]
+    Generic[Baz]
+  }
+
+  // Top level
+  object T1{
+    sealed abstract class Tree
+    final case class Node(left: Tree, right: Tree, v: Int) extends Tree
+    case object Leaf extends Tree
+  }
+
+  Generic[T1.Tree]
+  import T1._
+  Generic[Tree]
+
+  sealed trait A
+  sealed case class B(i: Int, s: String) extends A
+  case object C extends A
+  sealed trait D extends A
+  final case class E(a: Double, b: Option[Float]) extends D
+  case object F extends D
+  sealed abstract class Foo extends D
+  case object Baz extends Foo
+  final class Bar extends Foo
+  final class Baz(val i1: Int, val s1: String) extends Foo
+
+  Generic[A]
+  Generic[B]
+  Generic[C.type]
+  Generic[D]
+  Generic[E]
+  Generic[F.type]
+  Generic[Foo]
+  Generic[Baz.type]
+  Generic[Bar]
+  Generic[Baz]
+}
+
+object EnumDefns0 {
+  sealed trait EnumVal
+  val BarA = new EnumVal { val name = "A" }
+  val BarB = new EnumVal { val name = "B" }
+  val BarC = new EnumVal { val name = "C" }
+}
+
+object EnumDefns1 {
+  sealed trait EnumVal
+  object BarA extends EnumVal { val name = "A" }
+  object BarB extends EnumVal { val name = "B" }
+  object BarC extends EnumVal { val name = "C" }
+}
+
+object EnumDefns2 {
+  sealed trait EnumVal
+  case object BarA extends EnumVal { val name = "A" }
+  case object BarB extends EnumVal { val name = "B" }
+  case object BarC extends EnumVal { val name = "C" }
+}
+
+object EnumDefns3 {
+  sealed trait EnumVal
+  val BarA, BarB, BarC = new EnumVal {}
+}
+
+object EnumDefns4 {
+  sealed trait EnumVal
+  object EnumVal {
+    val BarA = new EnumVal { val name = "A" }
+    val BarB = new EnumVal { val name = "B" }
+    val BarC = new EnumVal { val name = "C" }
+  }
+}
+
+object EnumDefns5 {
+  sealed trait EnumVal
+  object EnumVal {
+    object BarA extends EnumVal { val name = "A" }
+    object BarB extends EnumVal { val name = "B" }
+    object BarC extends EnumVal { val name = "C" }
+  }
+}
+
+object EnumDefns6 {
+  sealed trait EnumVal
+  object EnumVal {
+    case object BarA extends EnumVal { val name = "A" }
+    case object BarB extends EnumVal { val name = "B" }
+    case object BarC extends EnumVal { val name = "C" }
+  }
+}
+
+object EnumDefns7 {
+  sealed trait EnumVal
+  object EnumVal {
+    val BarA, BarB, BarC = new EnumVal {}
+  }
+}
+
+class TestEnum {
+  @Test
+  def testEnum0 {
+    import EnumDefns0._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum1 {
+    import EnumDefns1._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum2 {
+    import EnumDefns2._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum3 {
+    import EnumDefns3._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum4 {
+    import EnumDefns4._
+    import EnumVal._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum5 {
+    import EnumDefns5._
+    import EnumVal._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum6 {
+    import EnumDefns6._
+    import EnumVal._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+
+  @Test
+  def testEnum7 {
+    import EnumDefns7._
+    import EnumVal._
+
+    val gen = Generic[EnumVal]
+    val a0 = gen.to(BarA)
+    assert(a0 == Inl(BarA))
+
+    val b0 = gen.to(BarB)
+    assert(b0 == Inr(Inl(BarB)))
+
+    val c0 = gen.to(BarC)
+    assert(c0 == Inr(Inr(Inl(BarC))))
+  }
+}
+
+package TestPrefixes1 {
+  trait Defs {
+    case class CC(i: Int, s: String)
+
+    sealed trait Sum
+    case class SumI(i: Int) extends Sum
+    case class SumS(s: String) extends Sum
+  }
+
+  object Defs extends Defs
+
+  object Derivations {
+    import shapeless._
+
+    Generic[Defs.CC]
+    Generic[Defs.SumI]
+    Generic[Defs.SumS]
+
+    Generic[Defs.Sum]
+    Generic.materialize[Defs.Sum, Defs.SumI :+: Defs.SumS :+: CNil]
+  }
+}
+
+package TestSingletonMembers {
+  case class CC(i: Int, s: Witness.`"msg"`.T)
+
+  object Derivations2 {
+    Generic[CC]
+  }
+}
+
+object PathVariantDefns {
+  sealed trait AtomBase {
+    sealed trait Atom
+    case class Zero(value: String) extends Atom
+  }
+
+  trait Atom1 extends AtomBase {
+    case class One(value: String) extends Atom
+  }
+
+  trait Atom2 extends AtomBase {
+    case class Two(value: String) extends Atom
+  }
+
+  object Atoms01 extends AtomBase with Atom1
+  object Atoms02 extends AtomBase with Atom2
+}
+
+object PathVariants {
+  import PathVariantDefns._
+
+  val gen1 = Generic[Atoms01.Atom]
+  implicitly[gen1.Repr =:= (Atoms01.One :+: Atoms01.Zero :+: CNil)]
+
+  val gen2 = Generic[Atoms02.Atom]
+  implicitly[gen2.Repr =:= (Atoms02.Two :+: Atoms02.Zero :+: CNil)]
+}
+
+object PrivateCtorDefns {
+  sealed trait PublicFamily
+  case class PublicChild() extends PublicFamily
+  private case class PrivateChild() extends PublicFamily
+}
+
+object PrivateCtor {
+  import PrivateCtorDefns._
+
+  illTyped("""
+  Generic[Access.PublicFamily]
+  """)
 }
